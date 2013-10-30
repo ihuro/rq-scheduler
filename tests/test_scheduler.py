@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import os
 import signal
 import time
+from dateutil.relativedelta import relativedelta
 from threading import Thread
 
 from rq import Queue
@@ -251,6 +252,15 @@ class TestScheduler(RQTestCase):
         job_from_queue = Job.fetch(job.id, connection=self.testconn)
         self.assertEqual(job_from_queue.meta['interval'], 10)
         self.assertEqual(job_from_queue.meta['repeat'], 11)
+
+    def test_interval_relativedelta_schedule(self):
+        """
+        Ensure that interval is correct saved and restored (JSON dump)
+        """
+        _rd = relativedelta(months=1, days=5, seconds=30)
+        job = self.scheduler.schedule(datetime.now(), say_hello, interval=_rd, repeat=11)
+        job_from_queue = Job.fetch(job.id, connection=self.testconn)
+        self.assertEqual(job_from_queue.meta['interval'], _rd)
 
     def test_repeat_without_interval_raises_error(self):
         # Ensure that an error is raised if repeat is specified without interval

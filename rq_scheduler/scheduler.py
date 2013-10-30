@@ -153,7 +153,10 @@ class Scheduler(object):
         job = self._create_job(func, args=args, kwargs=kwargs, commit=False,
                                result_ttl=result_ttl, ttl=ttl, id=id, description=description, queue_name=queue_name)
         if interval is not None:
-            job.meta['interval'] = json.dumps(interval, cls=JSONRDEncoder)
+            if isinstance(interval, dict):
+                job.meta['interval'] = json.dumps(interval, cls=JSONRDEncoder)
+            else:
+                job.meta['interval'] = interval
         if repeat is not None:
             job.meta['repeat'] = int(repeat)
         if repeat and interval is None:
@@ -295,7 +298,10 @@ class Scheduler(object):
             if repeat is not None:
                 if job.meta['repeat'] == 0:
                     return
-            interval = json.loads(interval)
+
+            if not isinstance(interval, int):
+                interval = json.loads(interval)
+
             if isinstance(interval, int):
                 next_run = int(datetime.now().strftime('%s')) + interval
             elif isinstance(interval, dict):
