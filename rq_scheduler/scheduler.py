@@ -1,9 +1,11 @@
+import json
 import logging
 import signal
 import time
 import warnings
 
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from itertools import repeat
 
 from rq.connections import resolve_connection
@@ -15,6 +17,18 @@ from redis import WatchError
 
 
 logger = logging.getLogger(__name__)
+
+
+class JSONRDEncoder(json.JSONEncoder):
+
+    def default(self, obj):
+        if isinstance(obj, relativedelta):
+            return {
+                'years': obj.years, 'months': obj.months,
+                'days': obj.days,'hours': obj.hours,
+                'minutes': obj.minutes, 'seconds': obj.seconds
+                }
+        return super(JSONRDEncoder, self).default(obj)
 
 
 class Scheduler(object):
@@ -142,7 +156,7 @@ class Scheduler(object):
         job = self._create_job(func, args=args, kwargs=kwargs, commit=False,
                                result_ttl=result_ttl)
         if interval is not None:
-            job.meta['interval'] = int(interval)
+            job.meta['interval'] = json.dumps(interval, cls=JSONRDEncoder)
         if repeat is not None:
             job.meta['repeat'] = int(repeat)
         if repeat and interval is None:
@@ -283,9 +297,15 @@ class Scheduler(object):
             if repeat is not None:
                 if job.meta['repeat'] == 0:
                     return
-            self.connection._zadd(self.scheduled_jobs_key,
-                                  int(datetime.now().strftime('%s')) + int(interval),
-                                  job.id)
+            interval = json.loads(interval)
+            if isinstance(interval, int):
+                next_run = int(datetime.now().strftime('%s')) + interval
+            elif isinstance(interval, dict):
+                interval = relativedelta(**interval)
+                next_run = int((datetime.now() + interval).strftime('%s'))
+            else:
+                return
+            self.connection._zadd(self.scheduled_jobs_key, next_run, job.id)
 
     def enqueue_jobs(self):
         """
@@ -294,7 +314,7 @@ class Scheduler(object):
         jobs = self.get_jobs_to_queue()
         for job in jobs:
             self.enqueue_job(job)
-        
+
         # Refresh scheduler key's expiry
         self.connection.expire(self.scheduler_key, self._interval + 10)
         return jobs
