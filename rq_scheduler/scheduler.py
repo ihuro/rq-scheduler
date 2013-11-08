@@ -156,7 +156,7 @@ class Scheduler(object):
         job = self._create_job(func, args=args, kwargs=kwargs, commit=False,
                                result_ttl=result_ttl)
         if interval is not None:
-            if isinstance(interval, dict):
+            if not isinstance(interval, int):
                 job.meta['interval'] = json.dumps(interval, cls=JSONRDEncoder)
             else:
                 job.meta['interval'] = interval
