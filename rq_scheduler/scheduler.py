@@ -303,10 +303,10 @@ class Scheduler(object):
                 interval = json.loads(interval)
 
             if isinstance(interval, int):
-                next_run = int(datetime.now().strftime('%s')) + interval
+                next_run = int(datetime.utcnow().strftime('%s')) + interval
             elif isinstance(interval, dict):
                 interval = relativedelta(**interval)
-                next_run = int((datetime.now() + interval).strftime('%s'))
+                next_run = int((datetime.utcnow() + interval).strftime('%s'))
             else:
                 return
             self.connection._zadd(self.scheduled_jobs_key, next_run, job.id)
