@@ -230,7 +230,7 @@ class Scheduler(object):
         """
         def epoch_to_datetime(epoch):
             return from_unix(float(epoch))
-        
+
         if until is None:
             until = "+inf"
         elif isinstance(until, datetime):
@@ -303,23 +303,21 @@ class Scheduler(object):
                 interval = json.loads(interval)
 
             if isinstance(interval, int):
-                next_run = int(datetime.now().strftime('%s')) + interval
+                next_run = int(datetime.utcnow().strftime('%s')) + interval
             elif isinstance(interval, dict):
                 interval = relativedelta(**interval)
-                next_run = int((datetime.now() + interval).strftime('%s'))
+                next_run = int((datetime.utcnow() + interval).strftime('%s'))
             else:
                 return
-                
-            self.connection._zadd(self.scheduled_jobs_key,
-                                  to_unix(datetime.utcnow()) + int(interval),
-                                  job.id)
+
+            self.connection._zadd(self.scheduled_jobs_key, next_run, job.id)
 
     def enqueue_jobs(self):
         """
         Move scheduled jobs into queues.
         """
         self.log.info('Checking for scheduled jobs...')
-        
+
         jobs = self.get_jobs_to_queue()
         for job in jobs:
             self.enqueue_job(job)
