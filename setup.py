@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
 from setuptools import setup
+import platform
+
+tests_require = []
+if platform.python_version() < '2.7':
+    tests_require.append('discover==0.4.0')
 
 setup(
     name='rq-scheduler',
-    version='0.3.6',
+    version='0.5.1',
     author='Selwin Ong',
     author_email='selwin.ong@gmail.com',
     packages=['rq_scheduler'],
@@ -18,14 +23,19 @@ setup(
     rqscheduler = rq_scheduler.scripts.rqscheduler:main
     ''',
     package_data = { '': ['README.rst'] },
-    install_requires=['rq>=0.3.5'],
+    tests_require=tests_require,
+    install_requires=['rq>=0.3.5'] + tests_require,
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Environment :: Console',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',
-        'Programming Language :: Python',
+        'Programming Language :: Python :: 2',
+        'Programming Language :: Python :: 2.6',
+        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.3',
         'Topic :: Software Development :: Libraries :: Python Modules',
     ]
 )

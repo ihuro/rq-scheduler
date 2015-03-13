@@ -1,6 +1,5 @@
 import unittest
 from redis import StrictRedis
-from logbook import NullHandler
 from rq import push_connection, pop_connection
 
 
@@ -14,18 +13,6 @@ def find_empty_redis_database():
         if empty:
             return testconn
     assert False, 'No empty Redis database found to run tests in.'
-
-
-def slow(f):
-    import os
-    from functools import wraps
-
-    @wraps(f)
-    def _inner(*args, **kwargs):
-        if os.environ.get('ONLY_RUN_FAST_TESTS'):
-            f(*args, **kwargs)
-
-    return _inner
 
 
 class RQTestCase(unittest.TestCase):
@@ -47,10 +34,6 @@ class RQTestCase(unittest.TestCase):
         # Store the connection (for sanity checking)
         cls.testconn = testconn
 
-        # Shut up logbook
-        cls.log_handler = NullHandler()
-        cls.log_handler.push_thread()
-
     def setUp(self):
         # Flush beforewards (we like our hygiene)
         self.testconn.flushdb()
@@ -64,11 +47,29 @@ class RQTestCase(unittest.TestCase):
         def assertIsNotNone(self, value, *args):
             self.assertNotEqual(value, None, *args)
 
+    # Implement assertIn for Python runtimes < 2.7 or < 3.1
+    if not hasattr(unittest.TestCase, 'assertIn'):
+        def assertIn(self, first, second, msg=None):
+            self.assertTrue(first in second, msg=msg)
+
+    # Implement assertNotIn for Python runtimes < 2.7 or < 3.1
+    if not hasattr(unittest.TestCase, 'assertNotIn'):
+        def assertNotIn(self, first, second, msg=None):
+            self.assertTrue(first not in second, msg=msg)
+
+    # Implement assertIsInstance for Python runtimes < 2.7 or < 3.1
+    if not hasattr(unittest.TestCase, 'assertIsInstance'):
+        def assertIsInstance(self, obj, cls, msg=None):
+            self.assertTrue(isinstance(obj, cls), msg=msg)
+
     @classmethod
     def tearDownClass(cls):
-        cls.log_handler.pop_thread()
 
         # Pop the connection to Redis
         testconn = pop_connection()
         assert testconn == cls.testconn, 'Wow, something really nasty ' \
                 'happened to the Redis connection stack. Check your setup.'
+
+# for python < 2.7, which doesn't have setUpClass
+if not hasattr(unittest.TestCase, 'setUpClass'):
+    RQTestCase.setUpClass()

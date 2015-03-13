@@ -6,6 +6,9 @@ RQ Scheduler
 adds job scheduling capabilities to `RQ <https://github.com/nvie/rq>`_,
 a `Redis <http://redis.io/>`_ based Python queuing library.
 
+.. image:: https://travis-ci.org/ui/rq-scheduler.svg?branch=master
+    :target: https://travis-ci.org/ui/rq-scheduler
+
 ============
 Requirements
 ============
@@ -37,20 +40,19 @@ Scheduling a Job
 
 There are two ways you can schedule a job. The first is using RQ Scheduler's ``enqueue_at``::
 
-    from rq import use_connection
+    from redis import Redis
     from rq_scheduler import Scheduler
     from datetime import datetime
 
-    use_connection() # Use RQ's default Redis connection
-    scheduler = Scheduler() # Get a scheduler for the "default" queue
+    scheduler = Scheduler(connection=Redis()) # Get a scheduler for the "default" queue
 
     # Puts a job into the scheduler. The API is similar to RQ except that it
     # takes a datetime object as first argument. So for example to schedule a
     # job to run on Jan 1st 2020 we do:
     scheduler.enqueue_at(datetime(2020, 1, 1), func)
 
-    # Here's another example scheduling a job to run at a specific date and time,
-    # complete with args and kwargs
+    # Here's another example scheduling a job to run at a specific date and time (in UTC),
+    # complete with args and kwargs.
     scheduler.enqueue_at(datetime(2020, 1, 1, 3, 4), func, foo, bar=baz)
 
 
@@ -67,15 +69,6 @@ popular a tweet is a few times during the course of the day, we could do somethi
     scheduler.enqueue_in(timedelta(days=1), count_retweets, tweet_id)
 
 
-You can also explicitly pass in ``connection`` to use a different Redis server::
-
-    from redis import Redis
-    from rq_scheduler import Scheduler
-    from datetime import datetime
-
-    scheduler = Scheduler('default', connection=Redis('192.168.1.3', port=123))
-    scheduler.enqueue_at(datetime(2020, 01, 01, 1, 1), func)
-
 ------------------------
 Periodic & Repeated Jobs
 ------------------------
@@ -87,10 +80,10 @@ You can do this via the ``schedule`` method. Note that this feature needs
 This is how you do it::
 
     scheduler.schedule(
-        scheduled_time=datetime.now(), # Time for first execution
+        scheduled_time=datetime.now(), # Time for first execution, in UTC timezone
         func=func,                     # Function to be queued
         args=[arg1, arg2],             # Arguments passed into function when executed
-        kwargs={'foo': 'bar'},       # Keyword arguments passed into function when executed
+        kwargs={'foo': 'bar'},         # Keyword arguments passed into function when executed
         interval=60,                   # Time before the function is called again, in seconds
         repeat=10                      # Repeat this number of times (None means repeat forever)
     )
@@ -170,27 +163,61 @@ The script accepts these arguments:
 * ``-d`` or ``--db``: Redis db to use
 * ``-P`` or ``--password``: password to connect to Redis
 
-=========
+The arguments pull default values from environment variables with the
+same names but with a prefix of ``RQ_REDIS_``.
+
+
 Changelog
 =========
 
-Version 0.3.6:
+Version 0.5.1
+-------------
+* Travis CI fixes. Thanks Steven Kryskalla!
+* Modified default logging configuration. You can pass in the ``-v`` or ``--verbose`` argument
+  to ``rqscheduler`` script for more verbose logging.
+* RQ Scheduler now registers Queue name when a new job is scheduled. Thanks @alejandrodob !
+* You can now schedule jobs with string references like ``scheduler.schedule(scheduled_time=now, func='foo.bar')``.
+  Thanks @SirScott !
+* ``rqscheduler`` script now accepts floating point intervals. Thanks Alexander Pikovsky!
+
+
+Version 0.5.0
+-------------
+* IMPORTANT! Job timestamps are now stored and interpreted in UTC format.
+  If you have existing scheduled jobs, you should probably change their timestamp
+  to UTC before upgrading to 0.5.0. Thanks @michaelbrooks!
+* You can now configure Redis connection via environment variables. Thanks @malthe!
+* ``rqscheduler`` script now accepts ``--pid`` argument. Thanks @jsoncorwin!
+
+Version 0.4.0
+-------------
+
+* Supports Python 3!
+* ``Scheduler.schedule`` now allows job ``timeout`` to be specified
+* ``rqscheduler`` allows Redis connection to be specified via ``--url`` argument
+* ``rqscheduler`` now accepts ``--path`` argument
+
+Version 0.3.6
+-------------
 
 * Scheduler key is not set to expire a few seconds after the next scheduling
   operation. This solves the issue of ``rqscheduler`` refusing to start after
   an unexpected shut down.
 
-Version 0.3.5:
+Version 0.3.5
+-------------
 
 * Support ``StrictRedis``
 
 
-Version 0.3.4:
+Version 0.3.4
+-------------
 
 * Scheduler related job attributes (``interval`` and ``repeat``) are now stored
   in ``job.meta`` introduced in RQ 0.3.4
 
-Version 0.3.3:
+Version 0.3.3
+-------------
 
 * You can now check whether a job is scheduled for execution using
   ``job in scheduler`` syntax
@@ -198,10 +225,12 @@ Version 0.3.3:
 * ``scheduler.enqueue`` and ``scheduler.enqueue_periodic`` will now raise a
   DeprecationWarning, please use ``scheduler.schedule`` instead
 
-Version 0.3.2:
+Version 0.3.2
+-------------
 
 * Periodic jobs now require `RQ`_ >= 0.3.1
 
-Version 0.3:
+Version 0.3
+-----------
 
 * Added the capability to create periodic (cron) and repeated job using ``scheduler.enqueue``

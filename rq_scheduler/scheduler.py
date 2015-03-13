@@ -8,13 +8,13 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from itertools import repeat
 
-from rq.connections import resolve_connection
 from rq.exceptions import NoSuchJobError
 from rq.job import Job
 from rq.queue import Queue
 
 from redis import WatchError
 
+from .utils import from_unix, to_unix
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ class Scheduler(object):
     scheduled_jobs_key = 'rq:scheduler:scheduled_jobs'
 
     def __init__(self, queue_name='default', interval=60, connection=None):
+        from rq.connections import resolve_connection
         self.connection = resolve_connection(connection)
         self.queue_name = queue_name
         self._interval = interval
@@ -53,7 +54,7 @@ class Scheduler(object):
             # Set scheduler key to expire a few seconds after polling interval
             # This way, the key will automatically expire if scheduler
             # quits unexpectedly
-            p.expire(key, self._interval + 10)
+            p.expire(key, int(self._interval) + 10)
             p.execute()
 
     def register_death(self):
@@ -73,7 +74,7 @@ class Scheduler(object):
             """
             Register scheduler's death and exit.
             """
-            self.log.debug('Shutting down RQ scheduler...')
+            self.log.info('Shutting down RQ scheduler...')
             self.register_death()
             raise SystemExit()
 
@@ -81,21 +82,17 @@ class Scheduler(object):
         signal.signal(signal.SIGTERM, stop)
 
     def _create_job(self, func, args=None, kwargs=None, commit=True,
-                    result_ttl=None):
+                    result_ttl=None, queue_name=None):
         """
         Creates an RQ job and saves it to Redis.
         """
-        if func.__module__ == '__main__':
-            raise ValueError(
-                    'Functions from the __main__ module cannot be processed '
-                    'by workers.')
         if args is None:
             args = ()
         if kwargs is None:
             kwargs = {}
         job = Job.create(func, args=args, connection=self.connection,
                          kwargs=kwargs, result_ttl=result_ttl)
-        job.origin = self.queue_name
+        job.origin = queue_name or self.queue_name
         if commit:
             job.save()
         return job
@@ -119,7 +116,7 @@ class Scheduler(object):
         """
         job = self._create_job(func, args=args, kwargs=kwargs)
         self.connection._zadd(self.scheduled_jobs_key,
-                              int(scheduled_time.strftime('%s')),
+                              to_unix(scheduled_time),
                               job.id)
         return job
 
@@ -127,11 +124,11 @@ class Scheduler(object):
         """
         Similar to ``enqueue_at``, but accepts a timedelta instead of datetime object.
         The job's scheduled execution time will be calculated by adding the timedelta
-        to datetime.now().
+        to datetime.utcnow().
         """
         job = self._create_job(func, args=args, kwargs=kwargs)
         self.connection._zadd(self.scheduled_jobs_key,
-                              int((datetime.now() + time_delta).strftime('%s')),
+                              to_unix(datetime.utcnow() + time_delta),
                               job.id)
         return job
 
@@ -146,7 +143,7 @@ class Scheduler(object):
                             interval=interval, repeat=repeat)
 
     def schedule(self, scheduled_time, func, args=None, kwargs=None,
-                interval=None, repeat=None, result_ttl=None, timeout=None):
+                interval=None, repeat=None, result_ttl=None, timeout=None, queue_name=None):
         """
         Schedule a job to be periodically executed, at a certain interval.
         """
@@ -154,7 +151,7 @@ class Scheduler(object):
         if interval is not None and result_ttl is None:
             result_ttl = -1
         job = self._create_job(func, args=args, kwargs=kwargs, commit=False,
-                               result_ttl=result_ttl)
+                               result_ttl=result_ttl, queue_name=queue_name)
         if interval is not None:
             if not isinstance(interval, int):
                 job.meta['interval'] = json.dumps(interval, cls=JSONRDEncoder)
@@ -168,12 +165,12 @@ class Scheduler(object):
             job.timeout = timeout
         job.save()
         self.connection._zadd(self.scheduled_jobs_key,
-                              int(scheduled_time.strftime('%s')),
+                              to_unix(scheduled_time),
                               job.id)
         return job
 
     def enqueue(self, scheduled_time, func, args=None, kwargs=None,
-                interval=None, repeat=None, result_ttl=None):
+                interval=None, repeat=None, result_ttl=None, queue_name=None):
         """
         This method is deprecated and only left in as a backwards compatibility
         alias for schedule().
@@ -181,7 +178,7 @@ class Scheduler(object):
         warnings.warn("'enqueue()' has been deprecated in favor of '.schedule()'"
                       "and will be removed in a future release.", DeprecationWarning)
         return self.schedule(scheduled_time, func, args, kwargs, interval,
-                             repeat, result_ttl)
+                             repeat, result_ttl, queue_name=queue_name)
 
     def cancel(self, job):
         """
@@ -213,7 +210,7 @@ class Scheduler(object):
                     pipe.watch(self.scheduled_jobs_key)
                     if pipe.zscore(self.scheduled_jobs_key, job.id) is None:
                         raise ValueError('Job not in scheduled jobs queue')
-                    pipe.zadd(self.scheduled_jobs_key, int(date_time.strftime('%s')), job.id)
+                    pipe.zadd(self.scheduled_jobs_key, to_unix(date_time), job.id)
                     break
                 except WatchError:
                     # If job is still in the queue, retry otherwise job is already executed
@@ -232,14 +229,14 @@ class Scheduler(object):
         it's scheduled execution time is returned.
         """
         def epoch_to_datetime(epoch):
-            return datetime.fromtimestamp(float(epoch))
-
+            return from_unix(float(epoch))
+        
         if until is None:
             until = "+inf"
         elif isinstance(until, datetime):
-            until = until.strftime('%s')
+            until = to_unix(until)
         elif isinstance(until, timedelta):
-            until = (datetime.now() + until).strftime('%s')
+            until = to_unix((datetime.utcnow() + until))
         job_ids = self.connection.zrangebyscore(self.scheduled_jobs_key, 0,
                                                 until, withscores=with_times,
                                                 score_cast_func=epoch_to_datetime)
@@ -266,7 +263,7 @@ class Scheduler(object):
         If with_times is True a list of tuples consisting of the job instance and
         it's scheduled execution time is returned.
         """
-        return self.get_jobs(int(time.strftime('%s')), with_times=with_times)
+        return self.get_jobs(to_unix(datetime.utcnow()), with_times=with_times)
 
     def get_queue_for_job(self, job):
         """
@@ -288,10 +285,11 @@ class Scheduler(object):
         # If job is a repeated job, decrement counter
         if repeat:
             job.meta['repeat'] = int(repeat) - 1
-        job.enqueued_at = datetime.now()
+        job.enqueued_at = datetime.utcnow()
         job.save()
 
         queue = self.get_queue_for_job(job)
+        self.connection.sadd(queue.redis_queues_keys, queue.key)
         queue.push_job_id(job.id)
         self.connection.zrem(self.scheduled_jobs_key, job.id)
 
@@ -311,18 +309,23 @@ class Scheduler(object):
                 next_run = int((datetime.now() + interval).strftime('%s'))
             else:
                 return
-            self.connection._zadd(self.scheduled_jobs_key, next_run, job.id)
+                
+            self.connection._zadd(self.scheduled_jobs_key,
+                                  to_unix(datetime.utcnow()) + int(interval),
+                                  job.id)
 
     def enqueue_jobs(self):
         """
         Move scheduled jobs into queues.
         """
+        self.log.info('Checking for scheduled jobs...')
+        
         jobs = self.get_jobs_to_queue()
         for job in jobs:
             self.enqueue_job(job)
 
         # Refresh scheduler key's expiry
-        self.connection.expire(self.scheduler_key, self._interval + 10)
+        self.connection.expire(self.scheduler_key, int(self._interval) + 10)
         return jobs
 
     def run(self):
@@ -330,7 +333,7 @@ class Scheduler(object):
         Periodically check whether there's any job that should be put in the queue (score
         lower than current time).
         """
-        self.log.debug('Running RQ scheduler...')
+        self.log.info('Running RQ scheduler...')
         self.register_birth()
         self._install_signal_handlers()
         try:
